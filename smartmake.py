@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 import re
 import subprocess
+import sys
 import traceback
 import yaml
 
@@ -78,8 +79,9 @@ class TaskSpec(object):
         :param redo_if_modified: if True, use modification times rather than 
             existence to decide whether to run. 
         """
-        if not params >= self.params:
-            raise MissingParameters(self.name, self.params - params)
+        param_set = set(params.keys())
+        if not param_set >= self.params:
+            raise MissingParameters(self.name, self.params - param_set)
         return Task(name=self.name, 
                     dependencies=[d.concretize(root_path, params) for d in self.dependencies],
                     command=self.command.format(**params),
@@ -167,7 +169,7 @@ class MakeGraph(object):
     def add_task(self, task):
         self.tasks.append(task)
         for g in task.generates:
-            self.rules[g.name] = task
+            self.rules[g] = task
         
     def concretize(self, target_name, params, graph=None, redo_if_modified=False):
         """Generates a concrete graph for building the given target name
@@ -238,13 +240,10 @@ def add_tasks(param_names, args, params, g, cg, target):
     target, for all combination of parameters."""
     if len(param_names) > 0:
         p_name = param_names[0]
-        p_value = getattr(args, p_name)
-        if p_value is not None:
-            # A value has been specified.  It can be a single value, or a list of values.
-            p_values = p_value.split(",")
-            for v in p_values:
-                params[p_name] = v
-                add_tasks(param_names[1:], args, params, g, cg, target)
+        p_value_list = getattr(args, p_name)
+        for v in p_value_list:
+            params[p_name] = v
+            add_tasks(param_names[1:], args, params, g, cg, target)
         # No value specified, skips parameter.
         add_tasks(param_names[1:], args, params, g, cg, target)
     else:
@@ -252,10 +251,18 @@ def add_tasks(param_names, args, params, g, cg, target):
         g.concretize(target, params, graph=cg, redo_if_modified=args.redo_if_modified)                
         
         
-def main(parser, definitions):
+def main(definitions):
     # First, parses the argument values.    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("yaml_file", type=str, help="Yaml file describing the dependencies.")
+    parser.add_argument("--root_path", type=str, help="Root path for the files.")
+    parser.add_argument("--target", type=str, help="Target file to be built (use the name in the yaml file)")
+    parser.add_argument("--redo_if_modified", default=False, action="store_true",
+                        help="If set, recomputer files that have a prior modification date than their dependencies.")
+    parser.add_argument("--parallelism", type=int, default=1,
+                        help="Number of parallel processes used during the build.")
     for p_name, p_help in definitions["parameters"].items():
-        parser.add_argument("--" + p_name.key(), type=str, default=None, help=p_help)
+        parser.add_argument("--" + p_name, type=str, nargs="*", default=[], help=p_help)
     args = parser.parse_args()
     # Builds the files. 
     names_to_filespec = {name: FileSpec(name, path) 
@@ -266,7 +273,7 @@ def main(parser, definitions):
         t = TaskSpec(
             name=t_desc["name"], 
             command=t_desc["command"],
-            target=names_to_filespec[t_desc["generates"]],
+            generates=t_desc["generates"] or [],
             dependencies=[names_to_filespec[d] for d in t_desc.get("dependencies", [])]
             )
         g.add_task(t)
@@ -280,15 +287,7 @@ def main(parser, definitions):
     print("All done.")
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("yaml_file", type=str, help="Yaml file describing the dependencies.")
-parser.add_argument("--root_path", type=str, help="Root path for the files.")
-parser.add_argument("--target", type=str, help="Target file to be built (use the name in the yaml file)")
-parser.add_argument("--redo_if_modified", default=False, action="store_true",
-                    help="If set, recomputer files that have a prior modification date than their dependencies.")
-parser.add_argument("--parallelism", type=int, default=1,
-                    help="Number of parallel processes used during the build.")
-args = parser.parse_args()
-with open(args.yaml_file) as f:
+yaml_file = sys.argv[1]
+with open(yaml_file) as f:
     definitions = yaml.load(f, yaml.SafeLoader)
-main(parser, definitions)
+main(definitions)

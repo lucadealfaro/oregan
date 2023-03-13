@@ -12,18 +12,18 @@ files:
 tasks:
 - name: GenerateF
   comment: Generates file F
-  command: ./waitfab.py --a={a} --b={b}
+  command: python tests/waitfab.py --a={a} --b={b}
   generates:
     - f_ab
     - ff_a
 
 - name: GenerateG
-  command: ./waitgac.py --a={a} --c={c}
+  command: python tests/waitgac.py --a={a} --c={c}
   generates: 
     - g_ac
 
 - name: Together
-  command: ./together.py --a={a} --b={b} --c={c}
+  command: python tests/together.py --a={a} --b={b} --c={c}
   dependencies:
     - f_ab
     - g_ac
