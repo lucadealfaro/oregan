@@ -51,6 +51,7 @@ class File(object):
     def refresh(self):
         self.exists = os.path.exists(self.path)
         self.time = os.path.getmtime(self.path) if self.exists else None
+        print("File", self.path, "exists", self.exists)
         
 
 class TaskSpec(object):
@@ -70,7 +71,9 @@ class TaskSpec(object):
         self.generates = generates or []
         self.params = get_params(command)
         for g in self.generates:
-            self.params.update(get_params(g))
+            self.params.update(get_params(g.path))
+        for d in self.dependencies:
+            self.params.update(get_params(d.path))
         
     def concretize(self, root_path, params, redo_if_modified=False):
         """Generates the concrete task.
@@ -116,6 +119,9 @@ class Task(object):
         # Its own future.
         self.future = None
         
+    def __repr__(self):
+        return "Name: {} Command: {}".format(self.name, self.command)
+        
     def needs_running(self):
         """
         Returns True/False according to whether we need to run the task. 
@@ -140,16 +146,17 @@ class Task(object):
             # First, waits for all predecessors to have finished.
             for f in self.futures_dependencies:
                 if not f.result():
+                    print("Job {} cannot be done as some dependency failed".format(self))
                     # The job failed. 
                     return False
             # Runs the task.
             print("Running", self.command)
             try:
-                subprocess.run(self.command.split())
+                subprocess.run(self.command.split(), check=True)
             except Exception as e:
-                traceback.print_exc(e)
+                print("Failed command:", self.command)
                 return False 
-            print("Done", self.command)
+            print("Done:", self.command)
         else:
             print("Task", self.command, "does not need re-running.")
         # Done. 
@@ -169,7 +176,7 @@ class MakeGraph(object):
     def add_task(self, task):
         self.tasks.append(task)
         for g in task.generates:
-            self.rules[g] = task
+            self.rules[g.name] = task
         
     def concretize(self, target_name, params, graph=None, redo_if_modified=False):
         """Generates a concrete graph for building the given target name
@@ -191,15 +198,15 @@ class MakeGraph(object):
             # Adds the concrete task.
             task = self.rules[name]
             concrete_task = task.concretize(self.root_path, params, redo_if_modified=redo_if_modified)
-            for g in concrete_task.generates:
-                file_to_task[g] = concrete_task
+            for generated in concrete_task.generates:
+                file_to_task[generated.path] = concrete_task
             g.tasks.append(concrete_task)
             # Adds the dependencies to what should be added.
             to_add |= {d.name for d in task.dependencies} - done
         # Now wires the dependencies and successors in the concrete graph.
         for concrete_task in g.tasks:
             for d in concrete_task.file_dependencies:
-                predecessor_task = file_to_task[d]
+                predecessor_task = file_to_task[d.path]
                 predecessor_task.task_successors.append(concrete_task)
                 concrete_task.task_dependencies.append(predecessor_task)
     
@@ -209,6 +216,9 @@ class CommandGraph(object):
 
     def __init__(self):
         self.tasks = []
+        
+    def __repr__(self):
+        return "Tasks: \n" + "\n".join([repr(t) for t in self.tasks])
                     
     def run(self, parallelism=1):
         """Runs the current graph. 
@@ -223,7 +233,7 @@ class CommandGraph(object):
                 t = to_add.pop()
                 # Fixes the futures dependencies of t. 
                 for pre_t in t.task_dependencies:
-                    t.futures_dependencies.add(pre_t.future)
+                    t.futures_dependencies.append(pre_t.future)
                 # And adds it to the thread pool executor. 
                 t.future = executor.submit(t.run)
                 # If a successor of t has all the predecessors already submitted, 
@@ -232,7 +242,7 @@ class CommandGraph(object):
                     if succ_t.future is None and all(tt.future is not None for tt in succ_t.task_dependencies):
                         to_add.add(succ_t)
             # Ok, now tasks are all in the thread pool.  We just need to wait for all of them to finish.
-            return all(t.result() for t in self.tasks)
+            return all(t.future.result() for t in self.tasks)
     
     
 def add_tasks(param_names, args, params, g, cg, target):
@@ -241,11 +251,13 @@ def add_tasks(param_names, args, params, g, cg, target):
     if len(param_names) > 0:
         p_name = param_names[0]
         p_value_list = getattr(args, p_name)
-        for v in p_value_list:
-            params[p_name] = v
+        if len(p_value_list) > 0:
+            for v in p_value_list:
+                params[p_name] = v
+                add_tasks(param_names[1:], args, params, g, cg, target)
+        else:
+            # No value specified, skips parameter.
             add_tasks(param_names[1:], args, params, g, cg, target)
-        # No value specified, skips parameter.
-        add_tasks(param_names[1:], args, params, g, cg, target)
     else:
         # We have the values of all parameters, we concretize the graph.
         g.concretize(target, params, graph=cg, redo_if_modified=args.redo_if_modified)                
@@ -273,14 +285,15 @@ def main(definitions):
         t = TaskSpec(
             name=t_desc["name"], 
             command=t_desc["command"],
-            generates=t_desc["generates"] or [],
-            dependencies=[names_to_filespec[d] for d in t_desc.get("dependencies", [])]
+            generates=[names_to_filespec[g] for g in (t_desc.get("generates", []) or [])],
+            dependencies=[names_to_filespec[d] for d in (t_desc.get("dependencies", []) or [])]
             )
         g.add_task(t)
     # Builds a single concrete graph.
     cg = CommandGraph()
     # Now adds to the command graph the concretizations of all the things to do.
     add_tasks(list(definitions["parameters"].keys()), args, {}, g, cg, args.target)
+    print(cg)
     # The concrete graph at this point contains all concrete tasks, and we can run it.
     cg.run(parallelism=args.parallelism)
     # That's all, folks. 
