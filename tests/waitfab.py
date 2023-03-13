@@ -8,8 +8,8 @@ args = parser.parse_args()
 
 time.sleep(1)
 
-f1 = "testfiles/file_f_{}_{}".format(args.a, args.b)
-f2 = "testfiles/file_ff_{}".format(args.a)
+f1 = "tests/testfiles/file_f_{}_{}".format(args.a, args.b)
+f2 = "tests/testfiles/file_ff_{}".format(args.a)
 
 with open(f1, "w") as f:
     f.write("ok")

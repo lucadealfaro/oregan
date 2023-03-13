@@ -152,7 +152,7 @@ class Task(object):
             # Runs the task.
             print("Running", self.command)
             try:
-                subprocess.run(self.command.split(), check=True)
+                subprocess.run(self.command, shell=True, check=True)
             except Exception as e:
                 print("Failed command:", self.command)
                 return False 

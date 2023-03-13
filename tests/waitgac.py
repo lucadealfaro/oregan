@@ -8,7 +8,7 @@ args = parser.parse_args()
 
 time.sleep(1)
 
-fn = "testfiles/file_g_{}_{}".format(args.a, args.c)
+fn = "tests/testfiles/file_g_{}_{}".format(args.a, args.c)
 
 with open(fn, "w") as f:
     f.write("done")

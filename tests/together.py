@@ -9,10 +9,10 @@ args = parser.parse_args()
 
 time.sleep(1)
 
-fn = "testfiles/file_h_{}_{}_{}".format(args.a, args.b, args.c)
+fn = "tests/testfiles/file_h_{}_{}_{}".format(args.a, args.b, args.c)
 
-f_ab = "testfiles/file_f_{}_{}".format(args.a, args.b)
-g_ac = "testfiles/file_g_{}_{}".format(args.a, args.c)
+f_ab = "tests/testfiles/file_f_{}_{}".format(args.a, args.b)
+g_ac = "tests/testfiles/file_g_{}_{}".format(args.a, args.c)
 
 with open(f_ab) as f:
     s1 = f.read()
