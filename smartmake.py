@@ -55,19 +55,21 @@ class File(object):
 class TaskSpec(object):
     """This class represents a node of the parameterized graph."""
     
-    def __init__(self, name=None, dependencies=None, command=None, target=None):
+    def __init__(self, name=None, dependencies=None, command=None, generates=None):
         """
         :param root_path: root path where to create files. 
         :param name: name of task
         :param dependencies: FileSpec dependencies of task (predecessors in the graph).
         :param command: command (with parameters inside) to build the target.
-        :param target: FileSpec that is built. 
+        :param generates: list of FileSpec that are built. 
         """
         self.name = name
         self.dependencies = dependencies or []
         self.command = command or None
-        self.target = target
-        self.params = get_params(target) | get_params(command)
+        self.generates = generates or []
+        self.params = get_params(command)
+        for g in self.generates:
+            self.params.update(get_params(g))
         
     def concretize(self, root_path, params, redo_if_modified=False):
         """Generates the concrete task.
@@ -81,7 +83,7 @@ class TaskSpec(object):
         return Task(name=self.name, 
                     dependencies=[d.concretize(root_path, params) for d in self.dependencies],
                     command=self.command.format(**params),
-                    target=self.target.concretize(root_path, params),
+                    generates=[g.concretize(root_path, params) for g in self.generates],
                     redo_if_modified=redo_if_modified
                     )
               
@@ -89,20 +91,20 @@ class TaskSpec(object):
 class Task(object):
     """This is a concrete task, where the parameters are resolved."""
     
-    def __init__(self, name=None, dependencies=None, command=None, target=None,
+    def __init__(self, name=None, dependencies=None, command=None, generates=None,
                  redo_if_modified=False):
         """
         :param name: name of task
         :param dependencies: File dependencies of task (predecessors in the graph).
         :param command: command (with parameters inside) to build the target.
-        :param target: File that is built. 
+        :param generates: list of File that are built. 
         :param redo_if_modified: if True, use modification times rather than 
             existence to decide whether to run. 
         """
         self.name = name
         self.file_dependencies = dependencies or []
         self.command = command or None
-        self.target = target
+        self.generates = generates or []
         self.done = False # In preparation for the execution. 
         # Dependencies in terms of tasks. 
         self.task_dependencies = []
@@ -118,15 +120,16 @@ class Task(object):
         NOTE: This MUST be called in topological order, dependencies first, 
         otherwise the propagation of modification times will not work properly.
         """
-        self.target.refresh()
-        if not self.target.exists:
+        for g in self.generates:
+            g.refresh()
+        if any(not g.exists for g in self.generates):
             return True
         if self.redo_if_modified:
-            target_time = self.target.time
-            for d in self.file_dependencies:
-                d.refresh()
-                if d.time > self.target.time:
-                    return True
+            for g in self.generates:
+                for d in self.file_dependencies:
+                    d.refresh()
+                    if d.time > g.time:
+                        return True
         return False
     
     def run(self):
@@ -158,12 +161,13 @@ class MakeGraph(object):
         self.root_path = root_path
         # List of tasks. 
         self.tasks = []
-        # Mapping from file name, to the task that creates that file. 
+        # Mapping from file name, to the task that generates that file. 
         self.rules = {}
         
     def add_task(self, task):
         self.tasks.append(task)
-        self.rules[task.target.name] = task
+        for g in task.generates:
+            self.rules[g.name] = task
         
     def concretize(self, target_name, params, graph=None, redo_if_modified=False):
         """Generates a concrete graph for building the given target name
@@ -176,17 +180,18 @@ class MakeGraph(object):
             existence to decide whether to run. 
         """
         g = CommandGraph() if graph is None else graph
-        to_add = {target_name}
+        to_add = {target_name} # We keep track of all the target names we need to build.
         done = set()
-        file_to_task = {}
+        file_to_task = {} # Mapping from each file to the task that generates it. 
         while len(to_add) > 0:
             name = to_add.pop()
             done.add(name)
             # Adds the concrete task.
             task = self.rules[name]
             concrete_task = task.concretize(self.root_path, params, redo_if_modified=redo_if_modified)
-            file_to_task[concrete_task.target] =  concrete_task
-            g.add_task(concrete_task)
+            for g in concrete_task.generates:
+                file_to_task[g] = concrete_task
+            g.tasks.append(concrete_task)
             # Adds the dependencies to what should be added.
             to_add |= {d.name for d in task.dependencies} - done
         # Now wires the dependencies and successors in the concrete graph.
@@ -202,14 +207,7 @@ class CommandGraph(object):
 
     def __init__(self):
         self.tasks = []
-        # No two tasks can refer to the same target. 
-        self.targets = set()
-        
-    def add_task(self, task):
-        if task.target.path not in self.targets:
-            self.tasks.append(task)
-            self.targets.add(task.target.path)
-            
+                    
     def run(self, parallelism=1):
         """Runs the current graph. 
         :param parallelism: how many tasks to run in parallel. 
@@ -219,7 +217,6 @@ class CommandGraph(object):
             # Before a task is added, we fix the set of all the futures on which 
             # it needs to wait. 
             to_add = {t for t in self.tasks if len(t.task_dependencies) == 0}
-            added = set()
             while len(to_add) > 0:
                 t = to_add.pop()
                 # Fixes the futures dependencies of t. 
@@ -270,7 +267,8 @@ def main(parser, definitions):
             name=t_desc["name"], 
             command=t_desc["command"],
             target=names_to_filespec[t_desc["generates"]],
-            dependencies=[names_to_filespec[d] for d in t_desc["dependencies"]])
+            dependencies=[names_to_filespec[d] for d in t_desc.get("dependencies", [])]
+            )
         g.add_task(t)
     # Builds a single concrete graph.
     cg = CommandGraph()

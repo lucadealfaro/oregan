@@ -1,0 +1,31 @@
+parameters:
+  a: number
+  b: number
+  c: number
+
+files:
+  f_ab: testfiles/file_f_{a}_{b}
+  ff_a: testfiles/file_ff_{a}
+  g_ac: testfiles/file_g_{a}_{c}
+  h_abc: testfiles/file_h_{a}_{b}_{c}
+
+tasks:
+- name: GenerateF
+  comment: Generates file F
+  command: ./waitfab.py --a={a} --b={b}
+  generates:
+    - f_ab
+    - ff_a
+
+- name: GenerateG
+  command: ./waitgac.py --a={a} --c={c}
+  generates: 
+    - g_ac
+
+- name: Together
+  command: ./together.py --a={a} --b={b} --c={c}
+  dependencies:
+    - f_ab
+    - g_ac
+  generates:
+    - h_abc
