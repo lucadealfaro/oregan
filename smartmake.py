@@ -43,7 +43,7 @@ class FileSpec(object):
 class File(object):
     """Class for storing a file, with its parameters instantiated."""
     
-    def __init__(self, name, path):
+    def __init__(self, path):
         self.path = path
         self.exists = os.path.exists(path)
         self.time = os.path.getmtime(path) if self.exists else None
