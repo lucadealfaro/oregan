@@ -108,6 +108,7 @@ class Task(object):
         self.name = name
         self.file_dependencies = dependencies or []
         self.command = command or None
+        self.redo_if_modified = redo_if_modified
         self.generates = generates or []
         self.done = False # In preparation for the execution. 
         # Dependencies in terms of tasks. 
