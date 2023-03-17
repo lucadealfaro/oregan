@@ -1,4 +1,4 @@
-# SmartMake
+# Oregan
 
 License: BSD
 
@@ -30,3 +30,8 @@ There are two additional parameters:
 `--parallelism` is the maximum number of commands executing in parallel. 
 
 Author: Luca de Alfaro, 2023.
+
+## Example
+
+Assume you have three tasks, `GenerateF`, `GenerateG`, `Together`.  
+Each of `GenerateF`, `GenerateG` generates some files, that `Together` then puts together. 

@@ -12,6 +12,6 @@ f1 = "tests/testfiles/file_f_{}_{}".format(args.a, args.b)
 f2 = "tests/testfiles/file_ff_{}".format(args.a)
 
 with open(f1, "w") as f:
-    f.write("ok")
+    f.write("a: {} b: {}\n".format(args.a, args.b))
 with open(f2, "w") as f:
-    f.write("ook")
+    f.write("a: {} b: {}\n".format(args.a, args.b))
