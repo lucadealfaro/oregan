@@ -1,0 +1,66 @@
+parameters:
+  bird: 6-letter nickname of bird
+  ebird_date_range: format 2015-01-01_2018-12-31 ; date range to use for eBird.
+  checklist_len: integer, max length of checklists considered. 
+  hop_distance: integer. 
+  num_spreads: integer. 
+  num_simulations: integer.
+  transmission_exponent: floating point, between 0 and 1.
+  num_seeds: floating point, used for the bird seed density in simulations. 
+
+files:
+  habitat: Data/CA/{bird}/habitat.tif
+  terrain: Data/CA/Terrain/terrain.tif
+  resistance: Data/CA/{bird}/resistance.csv
+  terrain_histogram_csv: Data/CA/{bird}/terrain_hist_{ebird_date_range}_checklist_len_{checklist_len}.csv
+  terrain_transmission_csv: Data/CA/{bird}/transmission_refined_{ebird_date_range}_checklist_len_{checklist_len}_transmission_{transmission_exponent}.csv
+  repopulation: Data/CA/{bird}/Output/repopulation_{ebird_date_range}_checklist_len_{checklist_len}_spreads_{num_spreads}_hop_{hop_distance}_sims_{num_simulations}_transmission_{transmission_exponent}.tif
+  gradient: Data/CA/{bird}/Output/gradient_{ebird_date_range}_checklist_len_{checklist_len}_spreads_{num_spreads}_hop_{hop_distance}_sims_{num_simulations}_transmission_{transmission_exponent}.tif
+  observations: Data/CA/{bird}/Observations_{ebird_date_range}_checklist_len_{checklist_len}.csv
+  observation_in_repopulation: Data/CA/{bird}/Observations/CA_all_date_range_{ebird_date_range}_checklist_len_{checklist_len}_spreads_{num_spreads}_hop_{hop_distance}_sims_{num_simulations}_transmission_{transmission_exponent}.csv
+
+
+tasks:
+- name: BirdTerrainObservations
+  comment: Collects the bird observations on the terrain.  This is used later to refine the 
+    terrain resistance/transmission.  This uses the ebird database. 
+  command: ./bird_terrain_observations.py --terrain={terrain} --bird={bird} --checklist_len={checklist_len} --date_range={ebird_date_range} --output_csv={terrain_histogram_csv}
+  dependencies:
+  - terrain
+  generates:
+  - terrain_histogram_csv
+
+- name: RefineResistance
+  comment: Use the bird observations on the terrain in order to refine the terrain resistance, computing the transmission. 
+  command: ./refine_resistance.py --bird={bird} --observations={terrain_histogram_csv} --transmission_exponent={transmission_exponent}
+  dependencies:
+  - resistance
+  - terrain_histogram_csv
+  generates:
+  - terrain_transmission_csv
+
+- name: Connectivity
+  comment: Runs the connectivity/repopulation.  Runs faster with a GPU.  This is BirdRunner.ipynb
+  command: ./connectivity.py --habitat={habitat} --terrain={terrain} --transmission={terrain_transmission_csv} --hop_distance={hop_distance} --num_spreads={num_spreads} --num_simulations={num_simulations} --repopulation={repopulation} --seed_density=4 
+  dependencies:
+  - habitat
+  - terrain
+  - terrain_transmission_csv
+  generates:
+  - repopulation
+
+- name: GatherObservations
+  comment: Gathers the bird observations, in preparation of validating the computation. This is GenerateValidationData.ipynb
+  command: ./gather_observations.py --bird={bird} --checklist_len={checklist_len} --date_range={ebird_date_range} --num_sample_squares=20000 --state="US-CA" --breeding=True
+  dependencies:
+  generates:
+  - observations
+
+- name: Validation
+  comment: Gathers, for each bird observation, the values of repopulation.  This is Validation.ipynb
+  command: ./validate.py --bird={bird} --observations={observations} --repopulation={repopulation}
+  dependencies:
+  - observations
+  - repopulation
+  generates:
+  - observation_in_repopulation

@@ -10,7 +10,7 @@ In general, in a scientific experiment, the whole dependency chain is parameteri
 This SmartMake enables the use of parameters in MakeFiles. 
 It is called via: 
 
-    python smartmake.py <spec.yaml> --root_path=<file_root_path> --target=<target_name> [parameters]
+    python oregan.py <spec.yaml> --root_path=<file_root_path> --target=<target_name> [parameters]
 
 where: 
 
@@ -21,7 +21,7 @@ where:
 
 As an example, the code can be tested with: 
 
-    python smartmake.py tests/test.yaml --root_path=tests --target=h_abc --a=1 --b=2 --c=3
+    python oregan.py tests/test.yaml --root_path=tests --target=h_abc --a=1 --b=2 --c=3
 
 There are two additional parameters: 
 
@@ -35,3 +35,8 @@ Author: Luca de Alfaro, 2023.
 
 Assume you have three tasks, `GenerateF`, `GenerateG`, `Together`.  
 Each of `GenerateF`, `GenerateG` generates some files, that `Together` then puts together. 
+
+## TODO
+
+* Enable reading the parameters from a file via a --param file.yaml option. 
+* Define exclusive resources (GPUs) for scheduling. 
