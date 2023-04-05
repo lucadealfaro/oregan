@@ -192,7 +192,7 @@ class MakeGraph(object):
         self.root_path = root_path
         # List of tasks. 
         self.tasks = []
-        # Mapping from file name, to the task that generates that file. 
+        # Mapping from file definition name, to the (abstract) task that generates that file. 
         self.rules = {}
         
     def add_task(self, task):
@@ -210,25 +210,29 @@ class MakeGraph(object):
         :param redo_if_modified: if True, use modification times rather than 
             existence to decide whether to run. 
         """
+        ## TODO: Need to keep in CommandGraph a mapping from parameters to tasks, to avoid 
+        # putting duplicate tasks that would be identical. 
         g = CommandGraph() if graph is None else graph
         to_add = {target_name} # We keep track of all the target names we need to build.
         done = set()
-        file_to_task = {} # Mapping from each file to the task that generates it. 
+        generated_tasks = []
         while len(to_add) > 0:
             name = to_add.pop()
             done.add(name)
             # Adds the concrete task.
             task = self.rules[name]
             concrete_task = task.concretize(self.root_path, params, redo_if_modified=redo_if_modified)
+            print("params:", params, "Concrete task path:", [d.path for d in concrete_task.file_dependencies])
             for generated in concrete_task.generates:
-                file_to_task[generated.path] = concrete_task
+                g.path_to_task[generated.path] = concrete_task
             g.tasks.append(concrete_task)
+            generated_tasks.append(concrete_task)
             # Adds the dependencies to what should be added.
             to_add |= {d.name for d in task.dependencies} - done
         # Now wires the dependencies and successors in the concrete graph.
-        for concrete_task in g.tasks:
+        for concrete_task in generated_tasks:
             for d in concrete_task.file_dependencies:
-                predecessor_task = file_to_task[d.path]
+                predecessor_task = g.path_to_task[d.path]
                 predecessor_task.task_successors.append(concrete_task)
                 concrete_task.task_dependencies.append(predecessor_task)
     
@@ -238,6 +242,7 @@ class CommandGraph(object):
 
     def __init__(self):
         self.tasks = []
+        self.path_to_task = {}
         
     def __repr__(self):
         return "Tasks: \n" + "\n".join([repr(t) for t in self.tasks])
