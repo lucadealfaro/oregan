@@ -1,5 +1,4 @@
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import threading
 import os
 import re
@@ -86,7 +85,7 @@ class TaskSpec(object):
         param_set = set(params.keys())
         if not param_set >= self.params:
             raise MissingParameters(self.name, self.params - param_set)
-        return Task(name=self.name, 
+        return Task(name=self.name + repr(params), 
                     dependencies=[d.concretize(root_path, params) for d in self.dependencies],
                     uses=self.uses,
                     command=self.command.format(**params),
@@ -113,16 +112,16 @@ class Task(object):
         self.command = command or None
         self.redo_if_modified = redo_if_modified
         self.generates = generates or []
-        self.done = False # In preparation for the execution. 
+        # Resouces it uses. 
+        self.uses = uses or []        
+        # Condition variable for this task. 
+        self.done = threading.Condition()
         # Dependencies in terms of tasks. 
         self.task_dependencies = [] # These are tasks. 
-        self.futures_dependencies = [] # These are futures. 
         # Successors in order of execution
         self.task_successors = []
-        # Its own future.
-        self.future = None
-        # Resouces it uses. 
-        self.uses = uses or []
+        # Did the task succeed? 
+        self.success = False
         
     def __repr__(self):
         return "Name: {} Command: {}".format(self.name, self.command)
@@ -145,28 +144,44 @@ class Task(object):
                         return True
         return False
     
-    def run(self):
+    def run(self, thread_semaphore):
         """This is called by the task executor to cause this concrete task to run."""
+        print("{} started".format(self.name))
         if self.needs_running():
             # First, waits for all predecessors to have finished.
-            for f in self.futures_dependencies:
-                if not f.result():
+            for t in self.task_dependencies:
+                print("Task {} waits for {}".format(self.name, t.name))
+                with t.done:
+                    t.done.wait()
+                if not t.success:
                     print("Job {} cannot be done as some dependency failed".format(self))
                     # The job failed. 
-                    return False
-            # Grabs any resources needed. 
+                    self.success = False
+                    with self.done:
+                        self.done.notify_all()
+                    return
+                print("Task {} got {}".format(self.name, t.name))
+            # We acquire the resources. 
             [r.acquire() for r in self.uses]
+            # We acquire the threads. 
+            thread_semaphore.acquire()
             # Runs the task.
             print("Running", self.command)
             try:
                 subprocess.run(self.command, shell=True, check=True)
+                self.success = True
+                print("Done:", self.command)
             except Exception as e:
                 print("Failed command:", self.command)
-                return False 
+                self.success = False
             finally:
+                # Release the thread.
+                thread_semaphore.release()
                 # Releases any resources.
                 [r.release() for r in self.uses]
-            print("Done:", self.command)
+                # We are done. 
+                with self.done:
+                    self.done.notify_all()
         else:
             print("Task", self.command, "does not need re-running.")
         # Done. 
@@ -234,25 +249,19 @@ class CommandGraph(object):
         """Runs the current graph. 
         :param parallelism: how many tasks to run in parallel. 
         """
-        with ThreadPoolExecutor(max_workers=parallelism) as executor:
-            # Puts all the concrete tasks in the executor, in topological order. 
-            # Before a task is added, we fix the set of all the futures on which 
-            # it needs to wait. 
-            to_add = {t for t in self.tasks if len(t.task_dependencies) == 0}
-            while len(to_add) > 0:
-                t = to_add.pop()
-                # Fixes the futures dependencies of t. 
-                for pre_t in t.task_dependencies:
-                    t.futures_dependencies.append(pre_t.future)
-                # And adds it to the thread pool executor. 
-                t.future = executor.submit(t.run)
-                # If a successor of t has all the predecessors already submitted, 
-                # we can schedule it to be added.
-                for succ_t in t.task_successors:
-                    if succ_t.future is None and all(tt.future is not None for tt in succ_t.task_dependencies):
-                        to_add.add(succ_t)
-            # Ok, now tasks are all in the thread pool.  We just need to wait for all of them to finish.
-            return all(t.future.result() for t in self.tasks)
+        # Creates the thread semaphore.
+        thread_semaphore = threading.BoundedSemaphore(value=parallelism)
+        # We just run everything, leaving the coordination to the condition 
+        # variables and the thread semaphore.
+        my_threads = []
+        for t in self.tasks:
+            th = threading.Thread(target=t.run, args=[thread_semaphore])
+            my_threads.append(th)
+            th.start()
+        # Waits for all the work to be done.
+        for th in my_threads:
+            th.join()
+        return all(t.success for t in self.tasks)
     
     
 def add_tasks(param_names, args, params, g, cg, target):
@@ -288,10 +297,10 @@ def main(definitions):
     args = parser.parse_args()
     # Builds the files. 
     names_to_filespec = {name: FileSpec(name, path) 
-                         for name, path in definitions["files"].items()}
+                         for name, path in (definitions.get("files") or {}).items()}
     # Builds the resources.
     name_to_resource = {name: threading.BoundedSemaphore(value=int(v))
-                        for name, v in definitions["resources"].items()}
+                        for name, v in (definitions.get("resources") or {}).items()}
     # Then, builds the abstract graph. 
     g = MakeGraph(args.root_path)
     for t_desc in definitions["tasks"]:
@@ -299,7 +308,7 @@ def main(definitions):
             name=t_desc["name"], 
             command=t_desc["command"],
             generates=[names_to_filespec[g] for g in (t_desc.get("generates", []) or [])],
-            dependencies=[names_to_filespec[d] for d in (t_desc.get("dependencies", []) or [])]
+            dependencies=[names_to_filespec[d] for d in (t_desc.get("dependencies", []) or [])],
             uses=[name_to_resource[n] for n in (t_desc.get("uses", []) or [])]
             )
         g.add_task(t)
