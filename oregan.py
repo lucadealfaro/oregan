@@ -146,11 +146,9 @@ class Task(object):
     
     def run(self, thread_semaphore):
         """This is called by the task executor to cause this concrete task to run."""
-        print("{} started".format(self.name))
         if self.needs_running():
             # First, waits for all predecessors to have finished.
             for t in self.task_dependencies:
-                print("Task {} waits for {}".format(self.name, t.name))
                 with t.done:
                     t.done.wait()
                 if not t.success:
@@ -160,7 +158,6 @@ class Task(object):
                     with self.done:
                         self.done.notify_all()
                     return
-                print("Task {} got {}".format(self.name, t.name))
             # We acquire the resources. 
             [r.acquire() for r in self.uses]
             # We acquire the threads. 
