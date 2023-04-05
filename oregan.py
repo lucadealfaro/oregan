@@ -1,5 +1,6 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import threading
 import os
 import re
 import subprocess
@@ -56,7 +57,7 @@ class File(object):
 class TaskSpec(object):
     """This class represents a node of the parameterized graph."""
     
-    def __init__(self, name=None, dependencies=None, command=None, generates=None):
+    def __init__(self, name=None, dependencies=None, command=None, generates=None, uses=None):
         """
         :param root_path: root path where to create files. 
         :param name: name of task
@@ -69,6 +70,7 @@ class TaskSpec(object):
         self.command = command or None
         self.generates = generates or []
         self.params = get_params(command)
+        self.uses = uses or []
         for g in self.generates:
             self.params.update(get_params(g.path))
         for d in self.dependencies:
@@ -86,6 +88,7 @@ class TaskSpec(object):
             raise MissingParameters(self.name, self.params - param_set)
         return Task(name=self.name, 
                     dependencies=[d.concretize(root_path, params) for d in self.dependencies],
+                    uses=self.uses,
                     command=self.command.format(**params),
                     generates=[g.concretize(root_path, params) for g in self.generates],
                     redo_if_modified=redo_if_modified
@@ -96,7 +99,7 @@ class Task(object):
     """This is a concrete task, where the parameters are resolved."""
     
     def __init__(self, name=None, dependencies=None, command=None, generates=None,
-                 redo_if_modified=False):
+                 redo_if_modified=False, uses=None):
         """
         :param name: name of task
         :param dependencies: File dependencies of task (predecessors in the graph).
@@ -112,12 +115,14 @@ class Task(object):
         self.generates = generates or []
         self.done = False # In preparation for the execution. 
         # Dependencies in terms of tasks. 
-        self.task_dependencies = []
-        self.futures_dependencies = []
+        self.task_dependencies = [] # These are tasks. 
+        self.futures_dependencies = [] # These are futures. 
         # Successors in order of execution
         self.task_successors = []
         # Its own future.
         self.future = None
+        # Resouces it uses. 
+        self.uses = uses or []
         
     def __repr__(self):
         return "Name: {} Command: {}".format(self.name, self.command)
@@ -149,6 +154,8 @@ class Task(object):
                     print("Job {} cannot be done as some dependency failed".format(self))
                     # The job failed. 
                     return False
+            # Grabs any resources needed. 
+            [r.acquire() for r in self.uses]
             # Runs the task.
             print("Running", self.command)
             try:
@@ -156,6 +163,9 @@ class Task(object):
             except Exception as e:
                 print("Failed command:", self.command)
                 return False 
+            finally:
+                # Releases any resources.
+                [r.release() for r in self.uses]
             print("Done:", self.command)
         else:
             print("Task", self.command, "does not need re-running.")
@@ -279,6 +289,9 @@ def main(definitions):
     # Builds the files. 
     names_to_filespec = {name: FileSpec(name, path) 
                          for name, path in definitions["files"].items()}
+    # Builds the resources.
+    name_to_resource = {name: threading.BoundedSemaphore(value=int(v))
+                        for name, v in definitions["resources"].items()}
     # Then, builds the abstract graph. 
     g = MakeGraph(args.root_path)
     for t_desc in definitions["tasks"]:
@@ -287,6 +300,7 @@ def main(definitions):
             command=t_desc["command"],
             generates=[names_to_filespec[g] for g in (t_desc.get("generates", []) or [])],
             dependencies=[names_to_filespec[d] for d in (t_desc.get("dependencies", []) or [])]
+            uses=[name_to_resource[n] for n in (t_desc.get("uses", []) or [])]
             )
         g.add_task(t)
     # Builds a single concrete graph.
