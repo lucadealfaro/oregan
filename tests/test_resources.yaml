@@ -1,0 +1,42 @@
+parameters:
+  a: number
+  b: number
+  c: number
+
+files:
+  f_ab: testfiles/file_f_{a}_{b}
+  ff_a: testfiles/file_ff_{a}
+  g_ac: testfiles/file_g_{a}_{c}
+  h_abc: testfiles/file_h_{a}_{b}_{c}
+
+resources:
+  gpu: 2
+  coffee: 1
+
+tasks:
+- name: GenerateF
+  comment: Generates file F
+  command: python tests/waitfab.py --a={a} --b={b}
+  uses: 
+    - gpu
+  generates:
+    - f_ab
+    - ff_a
+
+- name: GenerateG
+  command: python tests/waitgac.py --a={a} --c={c}
+  uses: 
+    - gpu
+  generates: 
+    - g_ac
+
+- name: Together
+  command: python tests/together.py --a={a} --b={b} --c={c}
+  uses: 
+    - coffee
+    - gpu
+  dependencies:
+    - f_ab
+    - g_ac
+  generates:
+    - h_abc
