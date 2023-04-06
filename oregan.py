@@ -116,6 +116,7 @@ class Task(object):
         self.uses = uses or []        
         # Condition variable for this task. 
         self.done = threading.Condition()
+        self.completed = False
         # Dependencies in terms of tasks. 
         self.task_dependencies = [] # These are tasks. 
         # Successors in order of execution
@@ -149,15 +150,16 @@ class Task(object):
         if self.needs_running():
             # First, waits for all predecessors to have finished.
             for t in self.task_dependencies:
-                with t.done:
-                    t.done.wait()
-                if not t.success:
-                    print("Job {} cannot be done as some dependency failed".format(self))
-                    # The job failed. 
-                    self.success = False
-                    with self.done:
-                        self.done.notify_all()
-                    return
+                if not t.completed:
+                    with t.done:
+                        t.done.wait() 
+                    if not t.success:
+                        print("Job {} cannot be done as some dependency failed".format(self))
+                        # The job failed. 
+                        self.success = False
+                        with self.done:
+                            self.done.notify_all()
+                        return
             # We acquire the resources. 
             [r.acquire() for r in self.uses]
             # We acquire the threads. 
@@ -177,6 +179,7 @@ class Task(object):
                 # Releases any resources.
                 [r.release() for r in self.uses]
                 # We are done. 
+                self.completed = True
                 with self.done:
                     self.done.notify_all()
         else:
@@ -210,8 +213,6 @@ class MakeGraph(object):
         :param redo_if_modified: if True, use modification times rather than 
             existence to decide whether to run. 
         """
-        ## TODO: Need to keep in CommandGraph a mapping from parameters to tasks, to avoid 
-        # putting duplicate tasks that would be identical. 
         g = CommandGraph() if graph is None else graph
         to_add = {target_name} # We keep track of all the target names we need to build.
         done = set()
