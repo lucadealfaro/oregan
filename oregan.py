@@ -153,13 +153,14 @@ class Task(object):
                 if not t.completed:
                     with t.done:
                         t.done.wait() 
-                    if not t.success:
-                        print("Job {} cannot be done as some dependency failed".format(self))
-                        # The job failed. 
-                        self.success = False
-                        with self.done:
-                            self.done.notify_all()
-                        return
+                if not t.success:
+                    print("Job {} cannot be done as some dependency failed".format(self))
+                    # The job failed. 
+                    self.success = False
+                    self.completed = True
+                    with self.done:
+                        self.done.notify_all()
+                    return
             # We acquire the resources. 
             [r.acquire() for r in self.uses]
             # We acquire the threads. 
@@ -176,8 +177,8 @@ class Task(object):
             finally:
                 # Release the thread.
                 thread_semaphore.release()
-                # Releases any resources.
-                [r.release() for r in self.uses]
+                # Releases any resources, in the opposite order in which they were acquired.
+                [r.release() for r in reversed(self.uses)]
                 # We are done. 
                 self.completed = True
                 with self.done:
