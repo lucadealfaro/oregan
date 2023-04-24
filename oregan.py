@@ -268,7 +268,7 @@ class CommandGraph(object):
         return all(t.success for t in self.tasks)
     
     
-def add_tasks(param_names, args, params, g, cg, target):
+def add_tasks(param_names, args, files, params, g, cg, target):
     """Adds to the concrete graph cg all the things to do due to the given 
     target, for all combination of parameters."""
     if len(param_names) > 0:
@@ -277,12 +277,15 @@ def add_tasks(param_names, args, params, g, cg, target):
         if len(p_value_list) > 0:
             for v in p_value_list:
                 params[p_name] = v
-                add_tasks(param_names[1:], args, params, g, cg, target)
+                add_tasks(param_names[1:], args, files, params, g, cg, target)
         else:
             # No value specified, skips parameter.
-            add_tasks(param_names[1:], args, params, g, cg, target)
+            add_tasks(param_names[1:], args, files, params, g, cg, target)
     else:
         # We have the values of all parameters, we concretize the graph.
+        files = {name: path.format(**params)
+                 for name, path in files.items()}
+        params.update(files)
         g.concretize(target, params, graph=cg, redo_if_modified=args.redo_if_modified)                
         
         
@@ -319,7 +322,7 @@ def main(definitions):
     # Builds a single concrete graph.
     cg = CommandGraph()
     # Now adds to the command graph the concretizations of all the things to do.
-    add_tasks(list(definitions["parameters"].keys()), args, {}, g, cg, args.target)
+    add_tasks(list(definitions["parameters"].keys()), args, definitions["files"], {}, g, cg, args.target)
     print(cg)
     # The concrete graph at this point contains all concrete tasks, and we can run it.
     cg.run(parallelism=args.parallelism)
