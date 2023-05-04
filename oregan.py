@@ -90,7 +90,8 @@ class TaskSpec(object):
                     uses=self.uses,
                     command=self.command.format(**params),
                     generates=[g.concretize(root_path, params) for g in self.generates],
-                    redo_if_modified=redo_if_modified
+                    redo_if_modified=redo_if_modified,
+                    root_path=root_path
                     )
               
         
@@ -98,7 +99,7 @@ class Task(object):
     """This is a concrete task, where the parameters are resolved."""
     
     def __init__(self, name=None, dependencies=None, command=None, generates=None,
-                 redo_if_modified=False, uses=None):
+                 redo_if_modified=False, uses=None, root_path=None):
         """
         :param name: name of task
         :param dependencies: File dependencies of task (predecessors in the graph).
@@ -106,6 +107,7 @@ class Task(object):
         :param generates: list of File that are built. 
         :param redo_if_modified: if True, use modification times rather than 
             existence to decide whether to run. 
+        :param root_path: path to run command
         """
         self.name = name
         self.file_dependencies = dependencies or []
@@ -123,6 +125,7 @@ class Task(object):
         self.task_successors = []
         # Did the task succeed? 
         self.success = False
+        self.root_path = root_path
         
     def __repr__(self):
         return "Name: {} Command: {}".format(self.name, self.command)
@@ -168,7 +171,7 @@ class Task(object):
             # Runs the task.
             print("Running", self.command)
             try:
-                subprocess.run(self.command, shell=True, check=True)
+                subprocess.run(self.command, shell=True, check=True, cwd=self.root_path)
                 self.success = True
                 print("Done:", self.command)
             except Exception as e:
@@ -221,6 +224,8 @@ class MakeGraph(object):
         while len(to_add) > 0:
             name = to_add.pop()
             done.add(name)
+            if os.path.exists(os.path.join(self.root_path, params[name])):
+                continue
             # Adds the concrete task.
             task = self.rules[name]
             concrete_task = task.concretize(self.root_path, params, redo_if_modified=redo_if_modified)
@@ -234,6 +239,8 @@ class MakeGraph(object):
         # Now wires the dependencies and successors in the concrete graph.
         for concrete_task in generated_tasks:
             for d in concrete_task.file_dependencies:
+                if os.path.isfile(d.path):
+                    continue
                 predecessor_task = g.path_to_task[d.path]
                 predecessor_task.task_successors.append(concrete_task)
                 concrete_task.task_dependencies.append(predecessor_task)
