@@ -2,7 +2,7 @@
 
 License: BSD
 
-A traditional Makefile encoded dependencies between files.
+A traditional Makefile encodes dependencies between files.
 
 When doing experiments, there are often experiment parameters (e.g., the num_simulations that are performed).
 In general, in a scientific experiment, the whole dependency chain is parameterized by such parameters: the whole dependency chain needs to be run with the given parameters. 
