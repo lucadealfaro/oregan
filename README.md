@@ -5,9 +5,9 @@ License: BSD
 A traditional Makefile encodes dependencies between files.
 
 When doing experiments, there are often experiment parameters (e.g., the num_simulations that are performed).
-In general, in a scientific experiment, the whole dependency chain is parameterized by such parameters: the whole dependency chain needs to be run with the given parameters. 
+In general, in a scientific experiment, there is data dependency: the whole dependency chain needs to be run with the given parameters. 
+Oregan tracks parameter dependencies in data, and schedules the code to be run to generate the data with the correct parameters. 
 
-This SmartMake enables the use of parameters in MakeFiles. 
 It is called via: 
 
     python oregan.py <spec.yaml> --root_path=<file_root_path> --target=<target_name> [parameters]
